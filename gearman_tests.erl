@@ -1,17 +1,19 @@
 -module(gearman_tests).
--author('Samuel Stauffer <samuel@descolada.com>').
+-author('Samuel Stauffer <samuel@lefora.com>').
 
--export([test/0]).
--import(gearman_connection, [connect/1]).
+-export([test/0, test_worker/0]).
 
 -include_lib("gearman.hrl").
 
+test_worker() ->
+    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(Task) -> Task#task.arg end}, {"fail", fun(Task) -> throw(Task#task.arg) end}]).
+
 test() ->
-    gearman_worker:start([{"127.0.0.1"}], [{"echo", fun(Task) -> Task#task.arg end}, {"fail", fun(Task) -> throw(Task#task.arg) end}]),
-    P = connect({"127.0.0.1"}),
+    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(Task) -> Task#task.arg end}, {"fail", fun(Task) -> throw(Task#task.arg) end}]),
+    {ok, P} = gearman_connection:connect({"127.0.0.1"}),
     receive
         {P, connected} -> void;
-        Any -> io:format("FAIL: Didn't receive 'connected' instead got ~p~n", [Any])
+        Any -> io:format("FAIL: Didn't receive 'connected' from ~p instead got ~p~n", [P, Any])
     end,
     gearman_connection:send_request(P, submit_job, {"echo", "", "Test"}),
     receive
@@ -30,7 +32,8 @@ test() ->
     receive
         {P, command, work_fail, {Handle4}} -> io:format("SUCCESS: Received work_fail for ~p~n", [Handle4]);
         Any5 -> io:format("FAIL: Didn't receive 'work_complete' instead got ~p~n", [Any5])
-    end.
+    end,
+    io:format("TESTS DONE~n").
 
     % P = connect({"127.0.0.1", 4730}),
     % send_request(P, echo_req, {"Test"}),

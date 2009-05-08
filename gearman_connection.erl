@@ -1,72 +1,142 @@
 -module(gearman_connection).
--author('Samuel Stauffer <samuel@descolada.com>').
+-author('Samuel Stauffer <samuel@lefora.com>').
 
--export([connect/1, send_request/3, send_response/3]).
+-export([connect/1, disconnect/1, send_request/3, send_response/3]).
+-export([terminate/2, handle_cast/2, code_change/3]).
 
 -define(DEFAULT_PORT, 4730).
--define(RECHECK_DELAY, 10000). %% milliseconds
+-define(RECONNECT_DELAY, 10000). %% milliseconds
 
--record(state, {host, port, pidparent, socket=void, buffer=[]}).
+-record(state, {host, port, pidparent, socket=not_connected, buffer=[]}).
 
-%% Public
 
 connect({Host}) ->
     connect({Host, ?DEFAULT_PORT});
 connect({Host, Port}) ->
-    % spawn(?MODULE, connect, [self(), Host, Port]).
     Self = self(),
-    spawn(fun() -> connect(Self, Host, Port) end).
+    Pid = spawn(fun() ->
+        {ok, State, Timeout} = init({Self, Host, Port}),
+        loop(State, Timeout)
+    end),
+    {ok, Pid}.
 
-send_request(PidConnection, Command, Args) ->
+call(Pid, Arg) ->
+    Ref = make_ref(),
+    Pid ! {'$gen_call', {self(), Ref}, Arg},
+    receive
+        {Ref, Res} ->
+            Res
+    end.
+
+disconnect(Pid) ->
+    call(Pid, {stop}).
+
+send_request(Pid, Command, Args) when is_pid(Pid) ->
     %% Do the packing here so errors are detected in the calling process
     Packet = pack_request(Command, Args),
-    PidConnection ! {self(), send_command, Packet}.
+    call(Pid, {send_command, Packet}).
 
-send_response(PidConnection, Command, Args) ->
+send_response(Pid, Command, Args) when is_pid(Pid) ->
     %% Do the packing here so errors are detected in the calling process
     Packet = pack_response(Command, Args),
-    PidConnection ! {self(), send_command, Packet}.
+    call(Pid, {send_command, Packet}).
 
+%%%
 
-%% Private
-
-connect(PidParent, Host, Port) ->
-    connect_state(#state{host=Host, port=Port, pidparent=PidParent}).
-
-connect_state(#state{host=Host, port=Port} = State) ->
-    case gen_tcp:connect(Host, Port, [binary, {packet, 0}]) of
-        {ok, Socket} ->
-            State#state.pidparent ! {self(), connected},
-            alive_loop(State#state{socket=Socket});
-        {error, econnrefused} ->
-            dead_loop(State)
-    end.
-
-alive_loop(#state{socket=Socket, pidparent=PidParent, buffer=Buffer} = State) ->
+loop(State, Timeout) ->
     receive
-        {tcp, Socket, Bin} ->
-            Data = Buffer ++ binary_to_list(Bin),
-            {ok, State} = handle_command(State, Data),
-            alive_loop(State);
-        {tcp_closed, Socket} ->
-            mark_dead(State);
-        {PidParent, send_command, Packet} ->
-            ok = gen_tcp:send(Socket, Packet),
-            alive_loop(State)
-    end.
-
-dead_loop(#state{pidparent=PidParent} = State) ->
-    receive
-        {PidParent, connect} ->
-            connect_state(State)
-    after ?RECHECK_DELAY ->
-        connect_state(State)
+        {'$gen_call', {From, Ref}, Arg} ->
+            R = handle_call(Arg, From, State),
+            case R of
+                {reply, Response, NewState} ->
+                    From ! {Ref, Response},
+                    loop(NewState, infinity);
+                {reply, Response, NewState, NewTimeout} when is_integer(NewTimeout) ->
+                    From ! {Ref, Response},
+                    loop(NewState, NewTimeout)
+            end;
+        Any ->
+            R = handle_info(Any, State)
+    after Timeout ->
+        R = handle_info(timeout, State)
     end,
-    dead_loop(State).
+    case R of
+        {noreply, NewState2, NewTimeout2} when is_integer(NewTimeout2) ->
+            loop(NewState2, NewTimeout2);
+        {noreply, NewState2} ->
+            loop(NewState2, infinity)
+    end.
 
-mark_dead(State) ->
+%%%------------------------------------------------------------------------
+%%% Callback functions from gen_server
+%%%------------------------------------------------------------------------
+
+init({PidParent, Host, Port}) ->
+    {ok, #state{host=Host, port=Port, pidparent=PidParent}, 0}.
+
+handle_call({send_command, Packet}, _From, State) ->
+    try gen_tcp:send(State#state.socket, Packet) of
+        ok ->
+            {reply, ok, State};
+        Any ->
+            io:format("gen_tcp:send returned unhandled value ~p~n", [Any]),
+            NewState = disconnect_state(State),
+            {reply, {error, Any}, NewState, ?RECONNECT_DELAY}
+    catch
+        Exc1:Exc2 ->
+            io:format("gen_tcp:send raised an exception ~p:~p~n", [Exc1, Exc2]),
+            NewState = disconnect_state(State),
+            {reply, {error, {Exc1, Exc2}}, NewState, ?RECONNECT_DELAY}
+    end;
+handle_call(stop, _From, State) ->
+    {stop, normal, State}.
+
+handle_info(timeout, #state{host=Host, port=Port, socket=OldSocket} = State) ->
+    case OldSocket of
+        not_connected ->
+            case gen_tcp:connect(Host, Port, [binary, {packet, 0}]) of
+                {ok, Socket} ->
+                    State#state.pidparent ! {self(), connected},
+                    NewState = State#state{socket=Socket},
+                    {noreply, NewState};
+                {error, econnrefused} ->
+                    {noreply, State, ?RECONNECT_DELAY}
+            end;
+        _ ->
+            io:format("Timeout while socket not disconnected: ~p~n", [State]),
+            {noreply, State}
+    end;
+handle_info({tcp, _Socket, Bin}, State) ->
+    Data = State#state.buffer ++ binary_to_list(Bin),
+    {ok, NewState} = handle_command(State, Data),
+    {noreply, NewState};
+handle_info({tcp_closed, _Socket}, State) ->
+    NewState = disconnect_state(State),
+    {noreply, NewState, ?RECONNECT_DELAY};
+handle_info(Info,  State) ->
+    io:format("UNHANDLED handle_info ~p ~p~n", [Info, State]),
+    {noreply, State}.
+
+terminate(_Reason, #state{socket=Socket}) ->
+    % io:format("~p stopping~n", [?MODULE]),
+    case Socket of
+        not_connected ->
+            void;
+        _ ->
+            gen_tcp:close()
+    end,
+    ok.
+
+handle_cast(_Msg, State) -> {noreply, State}.
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+
+%%%%%%%%%%%
+
+disconnect_state(State) ->
     State#state.pidparent ! {self(), disconnected},
-    dead_loop(State#state{socket=void, buffer=[]}).
+    gen_tcp:close(State#state.socket),
+    State#state{socket=not_connected, buffer=[]}.
+
 
 handle_command(State, Packet) ->
     {NewPacket, Command, Args} = parse_command(Packet),
