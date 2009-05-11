@@ -56,6 +56,8 @@ code_change(_OldSvn, StateName, State, _Extra) ->
 
 %% Event handlers
 
+working({Connection, command, noop, {}}, State) ->
+    {next_state, working, State};
 working({Connection, command, no_job, {}}, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, pre_sleep, {}),
     {next_state, sleeping, State, 15*1000};
