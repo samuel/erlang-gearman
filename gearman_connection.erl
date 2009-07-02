@@ -196,8 +196,8 @@ pack_response(Command, Args) when is_atom(Command), is_tuple(Args) ->
     {CommandID, ArgList} = pack_command(Command, Args),
     pack_command(CommandID, ArgList, "\000RES").
 pack_command(CommandID, Args, Magic) when is_integer(CommandID), is_list(Args), is_list(Magic) ->
-    Data = join(Args, [0]),
-    DataLength = length(Data),
+    Data = list_to_binary(join(Args, [0])),
+    DataLength = size(Data),
     list_to_binary([Magic, <<CommandID:32/big, DataLength:32/big>>, Data]).
 
 pack_command(set_client_id, {ClientID}) -> {22, [ClientID]};
