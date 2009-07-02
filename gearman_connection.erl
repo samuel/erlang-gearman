@@ -46,14 +46,14 @@ send_response(Pid, Command, Args) when is_pid(Pid) ->
 loop(State, Timeout) ->
     receive
         {'$gen_call', {From, Ref}, Arg} ->
-            R = handle_call(Arg, From, State),
-            case R of
+            R2 = handle_call(Arg, From, State),
+            case R2 of
                 {reply, Response, NewState} ->
                     From ! {Ref, Response},
-                    loop(NewState, infinity);
+                    R = {noreply, NewState};
                 {reply, Response, NewState, NewTimeout} when is_integer(NewTimeout) ->
                     From ! {Ref, Response},
-                    loop(NewState, NewTimeout)
+                    R = {noreply, NewState, NewTimeout}
             end;
         Any ->
             R = handle_info(Any, State)
