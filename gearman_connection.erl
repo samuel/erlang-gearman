@@ -154,8 +154,7 @@ parse_command(Data) when length(Data) >= 12 ->
     if
         size(Rest) >= DataLength ->
             {ArgData, NewPacket} = split_binary(Rest, DataLength),
-            Args = split(binary_to_list(ArgData), 0),
-            {Command, ArgList} = parse_command(CommandID, Args),
+            {Command, ArgList} = parse_command(CommandID, binary_to_list(ArgData)),
             {binary_to_list(NewPacket), Command, ArgList};
         true ->
             {Data, void, void}
@@ -163,30 +162,37 @@ parse_command(Data) when length(Data) >= 12 ->
 parse_command(Data) ->
     {Data, void, void}.
 
-parse_command(22, [ClientID]) -> {set_client_id, {ClientID}};
-parse_command(16, [Text]) -> {echo_req, {Text}};
-parse_command(12, [Handle, Numerator, Denominator]) -> {work_status, {Handle, list_to_integer(Numerator), list_to_integer(Denominator)}};
-parse_command(13, [Handle, Result]) -> {work_complete, {Handle, Result}};
-parse_command(14, [Handle]) -> {work_fail, {Handle}};
-parse_command(17, [Text]) -> {echo_res, {Text}};
-parse_command(19, [Code, Text]) -> {error, {list_to_integer(Code), Text}};
-parse_command(1, [Func]) -> {can_do, {Func}};
-parse_command(23, [Func, Timeout]) -> {can_do_timeout, {Func, list_to_integer(Timeout)}};
-parse_command(2, [Func]) -> {cant_do, {Func}};
+parse_command(22, ClientID) -> {set_client_id, {ClientID}};
+parse_command(16, Text) -> {echo_req, {Text}};
+parse_command(12, Data) ->
+    [Handle, Numerator, Denominator] = split(Data, 0, 2),
+    {work_status, {Handle, list_to_integer(Numerator), list_to_integer(Denominator)}};
+parse_command(13, Data) -> {work_complete, list_to_tuple(split(Data, 0, 1))}; % Handle, Result
+parse_command(14, Handle) -> {work_fail, Handle};
+parse_command(17, Text) -> {echo_res, Text};
+parse_command(19, Data) ->
+    [Code, Text] = split(Data, 0, 1),
+    {error, {list_to_integer(Code), Text}};
+parse_command(1, Func) -> {can_do, {Func}};
+parse_command(23, Data) ->
+    [Func, Timeout] = split(Data, 0, 1),
+    {can_do_timeout, {Func, list_to_integer(Timeout)}};
+parse_command(2, Func) -> {cant_do, {Func}};
 parse_command(3, []) -> {reset_abilities, {}};
 parse_command(4, []) -> {pre_sleep, {}};
 parse_command(9, []) -> {grab_job, {}};
-parse_command(11, [Handle, Func, Arg]) -> {job_assign, {Handle, Func, Arg}};
+parse_command(11, Data) -> {job_assign, list_to_tuple(split(Data, 0, 2))}; % Handle, Func, Arg
 parse_command(24, []) -> {all_yours, {}};
 parse_command(6, []) -> {noop, {}};
 parse_command(10, []) -> {no_job, {}};
-parse_command(7, [Func, Uniq, Arg]) -> {submit_job, {Func, Uniq, Arg}};
-parse_command(21, [Func, Uniq, Arg]) -> {submit_job_high, {Func, Uniq, Arg}};
-parse_command(18, [Func, Uniq, Arg]) -> {submit_job_bg, {Func, Uniq, Arg}};
-parse_command(8, [Handle]) -> {job_created, {Handle}};
-parse_command(15, [Handle]) -> {get_status, {Handle}};
-parse_command(20, [Handle, Known, Running, Numerator, Denominator]) -> {status_res, {Handle, Known, Running, list_to_integer(Numerator), list_to_integer(Denominator)}}.
-
+parse_command(7, Data) -> {submit_job, list_to_tuple(split(Data, 0, 2))}; % Func, Uniq, Arg
+parse_command(21, Data) -> {submit_job_high, list_to_tuple(split(Data, 0, 2))}; % Func, Uniq, Arg
+parse_command(18, Data) -> {submit_job_bg, list_to_tuple(split(Data, 0, 2))}; % Func, Uniq, Arg
+parse_command(8, Handle) -> {job_created, {Handle}};
+parse_command(15, Handle) -> {get_status, {Handle}};
+parse_command(20, Data) ->
+    [Handle, Known, Running, Numerator, Denominator] = split(Data, 0, 4),
+    {status_res, {Handle, Known, Running, list_to_integer(Numerator), list_to_integer(Denominator)}}.
 
 
 pack_request(Command, Args) when is_atom(Command), is_tuple(Args) ->
@@ -231,11 +237,13 @@ join([Head|Lists], Separator) ->
      lists:flatten([Head | [[Separator, Next] || Next <- Lists]]).
 
 %% Split a list into multiple lists by Separator
-split(List, Separator) ->
-    split(List, Separator, [], []).
-split([], _, [], []) -> [];
-split([], _, Lists, Current) -> Lists ++ [Current];
-split([Separator|Rest], Separator, Lists, Current) ->
-    split(Rest, Separator, Lists ++ [Current], []);
-split([Other|Rest], Separator, Lists, Current) ->
-    split(Rest, Separator, Lists, Current ++ [Other]).
+split(List, Separator, Count) ->
+    split(List, Separator, [], [], Count).
+
+split([], _, [], [], _) -> [];  %% empty set
+split([], _, Lists, Current, _) -> Lists ++ [Current]; %% nothing left to split
+split(List, _, Lists, [], 0) -> Lists ++ [List];
+split([Separator|Rest], Separator, Lists, Current, Count) when Count > 0 ->
+    split(Rest, Separator, Lists ++ [Current], [], Count-1);
+split([Other|Rest], Separator, Lists, Current, Count) when Count > 0 ->
+    split(Rest, Separator, Lists, Current ++ [Other], Count).
