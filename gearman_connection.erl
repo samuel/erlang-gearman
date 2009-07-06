@@ -44,21 +44,21 @@ send_response(Pid, Command, Args) when is_pid(Pid) ->
 %%%
 
 loop(State, Timeout) ->
-    receive
+    R = receive
         {'$gen_call', {From, Ref}, Arg} ->
             R2 = handle_call(Arg, From, State),
             case R2 of
                 {reply, Response, NewState} ->
                     From ! {Ref, Response},
-                    R = {noreply, NewState};
+                    {noreply, NewState};
                 {reply, Response, NewState, NewTimeout} when is_integer(NewTimeout) ->
                     From ! {Ref, Response},
-                    R = {noreply, NewState, NewTimeout}
+                    {noreply, NewState, NewTimeout}
             end;
         Any ->
-            R = handle_info(Any, State)
+            handle_info(Any, State)
     after Timeout ->
-        R = handle_info(timeout, State)
+        handle_info(timeout, State)
     end,
     case R of
         {noreply, NewState2, NewTimeout2} when is_integer(NewTimeout2) ->
@@ -148,7 +148,8 @@ handle_command(State, Packet) ->
             handle_command(State, NewPacket)
     end.
 
-
+%% Parse a list for a comamdna and return {rest_of_data:list, command:atom, arguments:tuple}.
+%% If no command then command and arguments are 'void'
 parse_command(Data) when length(Data) >= 12 ->
     <<"\000RES", CommandID:32/big, DataLength:32/big, Rest/binary>> = list_to_binary(Data),
     if
