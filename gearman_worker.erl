@@ -25,10 +25,11 @@ start(Server, Functions) ->
 
 init({_PidMaster, Server, Functions}) ->
     % process_flag(trap_exit, true),
-    {ok, Connection} = gearman_connection:connect(Server),
+    {ok, Connection} = gearman_connection:start_link(),
+    gearman_connection:connect(Connection, Server),
     {ok, dead, #state{connection=Connection, functions=Functions}}.
 
-%% Private
+%% Private Callbacks
 
 handle_info({Connection, connected}, _StateName, #state{connection=Connection} = State) ->
     register_functions(Connection, State#state.functions),

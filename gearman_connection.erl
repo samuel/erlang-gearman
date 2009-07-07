@@ -1,79 +1,52 @@
 -module(gearman_connection).
 -author('Samuel Stauffer <samuel@lefora.com>').
 
--export([connect/1, disconnect/1, send_request/3, send_response/3]).
--export([terminate/2, handle_cast/2, code_change/3]).
+-behaviour(gen_server).
+
+-export([start/0, start_link/0, stop/1, connect/2, send_request/3, send_response/3]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(DEFAULT_PORT, 4730).
 -define(RECONNECT_DELAY, 10000). %% milliseconds
 
--record(state, {host, port, pidparent, socket=not_connected, buffer=[]}).
+-record(state, {pidparent, host=null, port=null, socket=not_connected, buffer=[]}).
 
+start() ->
+    gen_server:start(?MODULE, self(), []).
 
-connect({Host}) ->
-    connect({Host, ?DEFAULT_PORT});
-connect({Host, Port}) ->
-    Self = self(),
-    Pid = spawn(fun() ->
-        {ok, State, Timeout} = init({Self, Host, Port}),
-        loop(State, Timeout)
-    end),
-    {ok, Pid}.
+start_link() ->
+    gen_server:start_link(?MODULE, self(), []).
 
-call(Pid, Arg) ->
-    Ref = make_ref(),
-    Pid ! {'$gen_call', {self(), Ref}, Arg},
-    receive
-        {Ref, Res} ->
-            Res
-    end.
+stop(Pid) when is_pid(Pid) ->
+    gen_server:call(Pid, stop).
 
-disconnect(Pid) ->
-    call(Pid, {stop}).
+connect(Pid, Host) when is_list(Host) ->
+    connect(Pid, {Host, ?DEFAULT_PORT});
+connect(Pid, {Host, Port}) when is_pid(Pid) ->
+    gen_server:call(Pid, {connect, Host, Port}).
 
 send_request(Pid, Command, Args) when is_pid(Pid) ->
-    %% Do the packing here so errors are detected in the calling process
+    % Do the packing here so errors are detected in the calling process
     Packet = pack_request(Command, Args),
-    call(Pid, {send_command, Packet}).
+    gen_server:call(Pid, {send_command, Packet}).
 
 send_response(Pid, Command, Args) when is_pid(Pid) ->
-    %% Do the packing here so errors are detected in the calling process
+    % Do the packing here so errors are detected in the calling process
     Packet = pack_response(Command, Args),
-    call(Pid, {send_command, Packet}).
-
-%%%
-
-loop(State, Timeout) ->
-    R = receive
-        {'$gen_call', {From, Ref}, Arg} ->
-            R2 = handle_call(Arg, From, State),
-            case R2 of
-                {reply, Response, NewState} ->
-                    From ! {Ref, Response},
-                    {noreply, NewState};
-                {reply, Response, NewState, NewTimeout} when is_integer(NewTimeout) ->
-                    From ! {Ref, Response},
-                    {noreply, NewState, NewTimeout}
-            end;
-        Any ->
-            handle_info(Any, State)
-    after Timeout ->
-        handle_info(timeout, State)
-    end,
-    case R of
-        {noreply, NewState2, NewTimeout2} when is_integer(NewTimeout2) ->
-            loop(NewState2, NewTimeout2);
-        {noreply, NewState2} ->
-            loop(NewState2, infinity)
-    end.
+    gen_server:call(Pid, {send_command, Packet}).
 
 %%%------------------------------------------------------------------------
 %%% Callback functions from gen_server
 %%%------------------------------------------------------------------------
 
-init({PidParent, Host, Port}) ->
-    {ok, #state{host=Host, port=Port, pidparent=PidParent}, 0}.
+init(PidParent) ->
+    {ok, #state{pidparent=PidParent}}.
 
+handle_call({connect, Host, Port}, _From, State) ->
+    NewState = State#state{host=Host, port=Port},
+    {reply, ok, NewState, 0};
 handle_call({send_command, Packet}, _From, State) ->
     try gen_tcp:send(State#state.socket, Packet) of
         ok ->
