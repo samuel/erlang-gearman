@@ -3,9 +3,9 @@
 
 -export([parse_command/1, pack_request/2, pack_response/2]).
 
--spec(parse_command/1 :: (Data :: list()) -> list() | {list(), atom(), atom(), tuple()}).
-parse_command(Data) when length(Data) >= 12 ->
-    <<"\000RE", TypeChar:8, CommandID:32/big, DataLength:32/big, Rest/binary>> = list_to_binary(Data),
+-spec(parse_command/1 :: (Data :: binary()) -> {'error', 'not_enough_data'} | {'ok', binary(), atom(), atom(), tuple()}).
+parse_command(Data) when size(Data) >= 12 ->
+    <<"\000RE", TypeChar:8, CommandID:32/big, DataLength:32/big, Rest/binary>> = Data,
     if
         size(Rest) >= DataLength ->
             Type = case TypeChar of
@@ -14,12 +14,12 @@ parse_command(Data) when length(Data) >= 12 ->
             end,
             {ArgData, NewPacket} = split_binary(Rest, DataLength),
             {Command, ArgList} = parse_command(CommandID, binary_to_list(ArgData)),
-            {binary_to_list(NewPacket), Type, Command, ArgList};
+            {ok, NewPacket, Type, Command, ArgList};
         true ->
-            Data
+            {error, not_enough_data}
     end;
-parse_command(Data) ->
-    Data.
+parse_command(_Data) ->
+    {error, not_enough_data}.
 
 parse_command(22, ClientID) -> {set_client_id, {ClientID}};
 parse_command(16, Text) -> {echo_req, {Text}};

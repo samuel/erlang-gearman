@@ -77,8 +77,8 @@ handle_info(timeout, #state{host=Host, port=Port, socket=OldSocket} = State) ->
             io:format("Timeout while socket not disconnected: ~p~n", [State]),
             {noreply, State}
     end;
-handle_info({tcp, _Socket, Bin}, State) ->
-    Data = State#state.buffer ++ binary_to_list(Bin),
+handle_info({tcp, _Socket, Bin}, #state{buffer=Buffer} = State) ->
+    Data = list_to_binary([Buffer, Bin]),
     {ok, NewState} = handle_command(State, Data),
     {noreply, NewState};
 handle_info({tcp_closed, _Socket}, State) ->
@@ -113,9 +113,9 @@ disconnect_state(State) ->
 
 handle_command(State, Packet) ->
     case gearman_protocol:parse_command(Packet) of
-        Packet ->
+        {error, not_enough_data} ->
             {ok, State};
-        {NewPacket, response, Command, Args} ->
+        {ok, NewPacket, response, Command, Args} ->
             State#state.pidparent ! {self(), command, Command, Args},
             handle_command(State, NewPacket)
     end.
