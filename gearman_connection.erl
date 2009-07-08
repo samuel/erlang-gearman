@@ -88,8 +88,8 @@ handle_info(Info,  State) ->
     io:format("UNHANDLED handle_info ~p ~p~n", [Info, State]),
     {noreply, State}.
 
-terminate(_Reason, #state{socket=Socket}) ->
-    % io:format("~p stopping~n", [?MODULE]),
+terminate(Reason, #state{socket=Socket}) ->
+    io:format("~p stopping: ~p~n", [?MODULE, Reason]),
     case Socket of
         not_connected ->
             void;
@@ -115,7 +115,7 @@ handle_command(State, Packet) ->
     case gearman_protocol:parse_command(Packet) of
         {error, not_enough_data} ->
             {ok, State};
-        {ok, NewPacket, response, Command, Args} ->
-            State#state.pidparent ! {self(), command, Command, Args},
+        {ok, NewPacket, response, Command} ->
+            State#state.pidparent ! {self(), command, Command},
             handle_command(State, NewPacket)
     end.

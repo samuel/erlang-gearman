@@ -57,12 +57,12 @@ code_change(_OldSvn, StateName, State, _Extra) ->
 
 %% Event handlers
 
-working({Connection, command, noop, {}}, #state{connection=Connection} = State) ->
+working({Connection, command, noop}, #state{connection=Connection} = State) ->
     {next_state, working, State};
-working({Connection, command, no_job, {}}, #state{connection=Connection} = State) ->
+working({Connection, command, no_job}, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, pre_sleep, {}),
     {next_state, sleeping, State, 15*1000};
-working({Connection, command, job_assign, {Handle, Func, Arg}}, #state{connection=Connection, functions=Functions} = State) ->
+working({Connection, command, {job_assign, Handle, Func, Arg}}, #state{connection=Connection, functions=Functions} = State) ->
     try dispatch_function(Functions, Func, #task{handle=Handle, func=Func, arg=Arg}) of
         {ok, Result} ->
             gearman_connection:send_request(Connection, work_complete, {Handle, Result});
@@ -80,7 +80,7 @@ working({Connection, command, job_assign, {Handle, Func, Arg}}, #state{connectio
 sleeping(timeout, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, grab_job, {}),
     {next_state, working, State};
-sleeping({Connection, command, noop, {}}, #state{connection=Connection} = State) ->
+sleeping({Connection, command, noop}, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, grab_job, {}),
     {next_state, working, State}.
 

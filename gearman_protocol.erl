@@ -13,46 +13,58 @@ parse_command(Data) when size(Data) >= 12 ->
                 $S -> response
             end,
             {ArgData, NewPacket} = split_binary(Rest, DataLength),
-            {Command, ArgList} = parse_command(CommandID, binary_to_list(ArgData)),
-            {ok, NewPacket, Type, Command, ArgList};
+            Command = parse_command(CommandID, binary_to_list(ArgData)),
+            {ok, NewPacket, Type, Command};
         true ->
             {error, not_enough_data}
     end;
 parse_command(_Data) ->
     {error, not_enough_data}.
 
-parse_command(22, ClientID) -> {set_client_id, {ClientID}};
-parse_command(16, Text) -> {echo_req, {Text}};
-parse_command(12, Data) ->
-    [Handle, Numerator, Denominator] = split(Data, 0, 2),
-    {work_status, {Handle, list_to_integer(Numerator), list_to_integer(Denominator)}};
-parse_command(13, Data) -> {work_complete, list_to_tuple(split(Data, 0, 1))}; % Handle, Result
-parse_command(14, Handle) -> {work_fail, Handle};
-parse_command(17, Text) -> {echo_res, Text};
-parse_command(19, Data) ->
-    [Code, Text] = split(Data, 0, 1),
-    {error, {list_to_integer(Code), Text}};
-parse_command(1, Func) -> {can_do, {Func}};
-parse_command(23, Data) ->
-    [Func, Timeout] = split(Data, 0, 1),
-    {can_do_timeout, {Func, list_to_integer(Timeout)}};
-parse_command(2, Func) -> {cant_do, {Func}};
-parse_command(3, []) -> {reset_abilities, {}};
-parse_command(4, []) -> {pre_sleep, {}};
-parse_command(9, []) -> {grab_job, {}};
-parse_command(11, Data) -> {job_assign, list_to_tuple(split(Data, 0, 2))}; % Handle, Func, Arg
-parse_command(24, []) -> {all_yours, {}};
-parse_command(6, []) -> {noop, {}};
-parse_command(10, []) -> {no_job, {}};
-parse_command(7, Data) -> {submit_job, list_to_tuple(split(Data, 0, 2))}; % Func, Uniq, Arg
-parse_command(21, Data) -> {submit_job_high, list_to_tuple(split(Data, 0, 2))}; % Func, Uniq, Arg
-parse_command(18, Data) -> {submit_job_bg, list_to_tuple(split(Data, 0, 2))}; % Func, Uniq, Arg
-parse_command(8, Handle) -> {job_created, {Handle}};
-parse_command(15, Handle) -> {get_status, {Handle}};
-parse_command(20, Data) ->
-    [Handle, Known, Running, Numerator, Denominator] = split(Data, 0, 4),
-    {status_res, {Handle, Known, Running, list_to_integer(Numerator), list_to_integer(Denominator)}}.
-
+parse_command(CommandID, Data) ->
+    case CommandID of
+        22 -> {set_client_id, Data}; % ClientID
+        16 -> {echo_req, Data}; % Text
+        12 ->
+            [Handle, Numerator, Denominator] = split(Data, 0, 2),
+            {work_status, Handle, list_to_integer(Numerator), list_to_integer(Denominator)};
+        13 ->
+            [Handle, Result] = split(Data, 0, 1),
+            {work_complete, Handle, Result};
+        14 -> {work_fail, Data}; % Handle
+        17 -> {echo_res, Data}; % Text
+        19 ->
+            [Code, Text] = split(Data, 0, 1),
+            {error, list_to_integer(Code), Text};
+        1 -> {can_do, Data}; % Function
+        23 ->
+            [Function, Timeout] = split(Data, 0, 1),
+            {can_do_timeout, Function, list_to_integer(Timeout)};
+        2 -> {cant_do, Data}; % Function
+        3 -> reset_abilities;
+        4 -> pre_sleep;
+        9 -> grab_job;
+        11 ->
+            [Handle, Function, Argument] = split(Data, 0, 2),
+            {job_assign, Handle, Function, Argument};
+        24 -> all_yours;
+        6 -> noop;
+        10 -> no_job;
+        7 ->
+            [Function, Unique, Argument] = split(Data, 0, 2),
+            {submit_job, Function, Unique, Argument};
+        21 ->
+            [Function, Unique, Argument] = split(Data, 0, 2),
+            {submit_job_high, Function, Unique, Argument};
+        18 ->
+            [Function, Unique, Argument] = split(Data, 0, 2),
+            {submit_job_bg, Function, Unique, Argument};
+        8 -> {job_created, Data}; % Handle
+        15 -> {get_status, Data}; % Handle
+        20 ->
+            [Handle, Known, Running, Numerator, Denominator] = split(Data, 0, 4),
+            {status_res, Handle, Known, Running, list_to_integer(Numerator), list_to_integer(Denominator)}
+    end.
 
 pack_request(Command, Args) when is_atom(Command), is_tuple(Args) ->
     {CommandID, ArgList} = pack_command(Command, Args),
