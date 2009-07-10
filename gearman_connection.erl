@@ -94,7 +94,7 @@ terminate(Reason, #state{socket=Socket}) ->
         not_connected ->
             void;
         _ ->
-            gen_tcp:close()
+            gen_tcp:close(Socket)
     end,
     ok.
 
