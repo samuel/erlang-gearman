@@ -22,7 +22,7 @@ start_link() ->
 stop(Pid) when is_pid(Pid) ->
     gen_server:cast(Pid, stop).
 
-connect(Pid, Host) when is_list(Host) ->
+connect(Pid, Host) when is_pid(Pid), is_list(Host) ->
     connect(Pid, {Host, ?DEFAULT_PORT});
 connect(Pid, {Host, Port}) when is_pid(Pid) ->
     gen_server:call(Pid, {connect, Host, Port}).

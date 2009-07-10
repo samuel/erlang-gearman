@@ -3,13 +3,11 @@
 
 -export([test/0, test_worker/0]).
 
--include_lib("gearman.hrl").
-
 test_worker() ->
-    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(Task) -> Task#task.arg end}, {"fail", fun(Task) -> throw(Task#task.arg) end}]).
+    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(_Handle, _Func, Arg) -> Arg end}, {"fail", fun(_Handle, _Func, Arg) -> throw(Arg) end}]).
 
 test() ->
-    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(Task) -> Task#task.arg end}, {"fail", fun(Task) -> throw(Task#task.arg) end}]),
+    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(_Handle, _Func, Arg) -> Arg end}, {"fail", fun(_Handle, _Func, Arg) -> throw(Arg) end}]),
     {ok, P} = gearman_connection:connect({"127.0.0.1"}),
     receive
         {P, connected} -> void;

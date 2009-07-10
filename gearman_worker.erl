@@ -11,23 +11,28 @@
 %% fsm events
 -export([working/2, sleeping/2, dead/2]).
 
--include_lib("gearman.hrl").
+-record(state, {connection, modules, functions}).
 
--record(state, {connection, functions}).
+start_link(Server, WorkerModules) ->
+    gen_fsm:start_link(?MODULE, {self(), Server, WorkerModules}, []).
 
-start_link(Server, Functions) ->
-    gen_fsm:start_link(?MODULE, {self(), Server, Functions}, []).
-
-start(Server, Functions) ->
-    gen_fsm:start(?MODULE, {self(), Server, Functions}, []).
+start(Server, WorkerModules) ->
+    gen_fsm:start(?MODULE, {self(), Server, WorkerModules}, []).
 
 %% gen_server callbacks
 
-init({_PidMaster, Server, Functions}) ->
-    % process_flag(trap_exit, true),
+init({_PidMaster, Server, WorkerModules}) ->
+	Functions = get_functions(WorkerModules),
     {ok, Connection} = gearman_connection:start_link(),
     gearman_connection:connect(Connection, Server),
-    {ok, dead, #state{connection=Connection, functions=Functions}}.
+    {ok, dead, #state{connection=Connection, modules=WorkerModules, functions=Functions}}.
+
+get_functions(Modules) ->
+	get_functions(Modules, []).
+get_functions([], Functions) ->
+	lists:flatten(Functions);
+get_functions([Module|Modules], Functions) ->
+	get_functions(Modules, [Functions, Module:functions()]).
 
 %% Private Callbacks
 
@@ -63,7 +68,7 @@ working({Connection, command, no_job}, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, pre_sleep, {}),
     {next_state, sleeping, State, 15*1000};
 working({Connection, command, {job_assign, Handle, Func, Arg}}, #state{connection=Connection, functions=Functions} = State) ->
-    try dispatch_function(Functions, Func, #task{handle=Handle, func=Func, arg=Arg}) of
+    try dispatch_function(Functions, Func, Arg, Handle) of
         {ok, Result} ->
             gearman_connection:send_request(Connection, work_complete, {Handle, Result});
         {error, _Reason} ->
@@ -90,15 +95,15 @@ dead(Event, State) ->
 
 %%%
 
-dispatch_function([], _Func, _Task) ->
+dispatch_function([], _Func, _Arg, _Handle) ->
     {error, invalid_function};
-dispatch_function([{Name, Function}|Functions], Func, Task) ->
+dispatch_function([{Name, Function}|Functions], Func, Arg, Handle) ->
     if
         Name == Func ->
-            Res = Function(Task),
+            Res = Function(Handle, Func, Arg),
             {ok, Res};
         true ->
-            dispatch_function(Functions, Func, Task)
+            dispatch_function(Functions, Func, Arg, Handle)
     end.
 
 register_functions(_Connection, []) ->

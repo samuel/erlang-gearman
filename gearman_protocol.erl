@@ -12,9 +12,9 @@ parse_command(Data) when size(Data) >= 12 ->
                 $Q -> request;
                 $S -> response
             end,
-            {ArgData, NewPacket} = split_binary(Rest, DataLength),
+            {ArgData, LeftOverData} = split_binary(Rest, DataLength),
             Command = parse_command(CommandID, binary_to_list(ArgData)),
-            {ok, NewPacket, Type, Command};
+            {ok, LeftOverData, Type, Command};
         true ->
             {error, not_enough_data}
     end;
