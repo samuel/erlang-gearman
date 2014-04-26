@@ -1,12 +1,9 @@
 {application, gearman_worker,
  [
-  {description, ""},
   {vsn, "1"},
-  {registered, []},
+  {modules [gearman_connection, gearman_protocol, gearman_worker]}
   {applications, [
                   kernel,
                   stdlib
                  ]},
-  {mod, { gearman_worker, []}},
-  {env, []}
  ]}.
