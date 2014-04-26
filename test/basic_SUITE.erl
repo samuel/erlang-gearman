@@ -1,37 +1,68 @@
--module(gearman_tests).
+-module(basic_SUITE).
 -author('Samuel Stauffer <samuel@lefora.com>').
 
--export([test/0, test_worker/0]).
+-include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
-test_worker() ->
-    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(_Handle, _Func, Arg) -> Arg end}, {"fail", fun(_Handle, _Func, Arg) -> throw(Arg) end}]).
+-export([all/0, init_per_testcase/2, end_per_testcase/2]).
+-export([test_client/1, test_worker/1]).
+-export([functions/0, echo/3, fail/3]).
 
-test() ->
-    gearman_worker:start({"127.0.0.1"}, [{"echo", fun(_Handle, _Func, Arg) -> Arg end}, {"fail", fun(_Handle, _Func, Arg) -> throw(Arg) end}]),
-    {ok, P} = gearman_connection:connect({"127.0.0.1"}),
+-define(SERVER_TIMEOUT, 5000).
+-define(GEARMAN_HOST, "127.0.0.1").
+
+all() -> [test_worker, test_client].
+%~ all() -> [test_worker].
+
+init_per_testcase(_Case, Config) ->
+	Config.
+
+
+end_per_testcase(_Case, Config) ->
+	Config.
+
+test_worker(_Config) ->
+    Result = gearman_worker:start(?GEARMAN_HOST, [?MODULE]),
+    ?assertMatch({ok, _}, Result),
+    {comment, "OK"}.
+
+test_client(_Config) ->
+    {ok, _Pid}       = gearman_worker:start(?GEARMAN_HOST, [?MODULE]),
+    {ok, P} = gearman_connection:start_link(),
+    ok      = gearman_connection:connect(P, ?GEARMAN_HOST),
+
     receive
-        {P, connected} -> void;
-        Any -> io:format("FAIL: Didn't receive 'connected' from ~p instead got ~p~n", [P, Any])
+        {P, connected} -> ok
+	after ?SERVER_TIMEOUT ->
+		ct:fail("Connection to gearman server timedout")
     end,
+
     gearman_connection:send_request(P, submit_job, {"echo", "", "Test"}),
     receive
-        {P, command, job_created, {Handle}} -> io:format("SUCCESS: Received job_created: ~p~n", [Handle]);
-        Any2 -> io:format("FAIL: Didn't receive 'job_created' instead got ~p~n", [Any2])
+        {P, command, {job_created, _Handle}} -> ok
+    after ?SERVER_TIMEOUT ->
+		ct:fail("creating task 'echo' failed")
     end,
     receive
-        {P, command, work_complete, {Handle2, Result}} -> io:format("SUCCESS: Received work_complete for ~p: ~p~n", [Handle2, Result]);
-        Any3 -> io:format("FAIL: Didn't receive 'work_complete' instead got ~p~n", [Any3])
+        {P, command, {work_complete, _Handle2, _Result}} -> ok;
+        Any -> ct:fail(Any)
+    after ?SERVER_TIMEOUT ->
+		ct:fail("Didn't receive 'work_complete' for 'echo' task")
     end,
+
     gearman_connection:send_request(P, submit_job, {"fail", "", "Test"}),
     receive
-        {P, command, job_created, {Handle3}} -> io:format("SUCCESS: Received job_created: ~p~n", [Handle3]);
-        Any4 -> io:format("FAIL: Didn't receive 'job_created' instead got ~p~n", [Any4])
+        {P, command, {job_created, _Handle3}} -> ok
+	after ?SERVER_TIMEOUT ->
+		ct:fail("creating task 'fail' failed")
     end,
     receive
-        {P, command, work_fail, {Handle4}} -> io:format("SUCCESS: Received work_fail for ~p~n", [Handle4]);
-        Any5 -> io:format("FAIL: Didn't receive 'work_complete' instead got ~p~n", [Any5])
+        {P, command, {work_fail, _Handle4}} -> ok
+    after ?SERVER_TIMEOUT ->
+		ct:fail("Didn't receive 'work_complete' for 'echo' task")
     end,
-    io:format("TESTS DONE~n").
+
+    {comment, "OK"}.
 
     % P = connect({"127.0.0.1", 4730}),
     % send_request(P, echo_req, {"Test"}),
@@ -48,3 +79,17 @@ test() ->
     %     Any2 ->
     %         io:format("FAIL: Received unexpected message ~p~n", [Any2])
     % end.
+
+%% ====================================================================
+%% gearman worker functions
+%% ====================================================================
+
+
+functions() ->
+	[{"echo", fun echo/3}, {"fail", fun fail/3}].
+
+echo(_Handle, _Func, Arg) ->
+	Arg.
+
+fail(_Handle, _Func, Arg) ->
+	throw(Arg).
