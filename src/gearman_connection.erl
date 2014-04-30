@@ -10,6 +10,7 @@
 
 -define(DEFAULT_PORT, 4730).
 -define(RECONNECT_DELAY, 10000). %% milliseconds
+-define(CONNECT_TIMEOUT, 30000).
 
 -record(state, {pidparent, host=null, port=null, socket=not_connected, buffer=[]}).
 
@@ -65,13 +66,15 @@ handle_call({send_command, Packet}, _From, State) ->
 handle_info(timeout, #state{host=Host, port=Port, socket=OldSocket} = State) ->
     case OldSocket of
         not_connected ->
-            case gen_tcp:connect(Host, Port, [binary, {packet, 0}]) of
+            case gen_tcp:connect(Host, Port, [binary, {packet, 0}], ?CONNECT_TIMEOUT) of
                 {ok, Socket} ->
                     State#state.pidparent ! {self(), connected},
                     NewState = State#state{socket=Socket},
                     {noreply, NewState};
                 {error, econnrefused} ->
-                    {noreply, State, ?RECONNECT_DELAY}
+                    {noreply, State, ?RECONNECT_DELAY};
+                {error, timeout} ->
+					{noreply, State, ?RECONNECT_DELAY}
             end;
         _ ->
             io:format("Timeout while socket not disconnected: ~p~n", [State]),

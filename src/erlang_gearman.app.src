@@ -1,0 +1,5 @@
+{application, erlang_gearman,
+ [
+  {vsn, "1"},
+  {modules, [gearman_connection, gearman_protocol, gearman_worker]}
+ ]}.
