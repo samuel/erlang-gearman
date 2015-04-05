@@ -68,17 +68,23 @@ working({Connection, command, no_job}, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, pre_sleep, {}),
     {next_state, sleeping, State, 15*1000};
 working({Connection, command, {job_assign, Handle, Func, Arg}}, #state{connection=Connection, functions=Functions} = State) ->
-    try dispatch_function(Functions, Func, Arg, Handle) of
-        {ok, Result} ->
-            gearman_connection:send_request(Connection, work_complete, {Handle, Result});
-        {error, _Reason} ->
-            io:format("Unknown function ~p~n", [Func]),
-            gearman_connection:send_request(Connection, work_fail, {Handle})
-    catch
-        Exc1:Exc2 ->
-            io:format("Work failed for function ~p: ~p:~p~n~p~n", [Func, Exc1, Exc2, erlang:get_stacktrace()]),
-            gearman_connection:send_request(Connection, work_fail, {Handle})
+
+    F = fun() ->
+        try dispatch_function(Functions, Func, Arg, Handle) of
+            {ok, Result} ->
+                gearman_connection:send_request(Connection, work_complete, {Handle, Result});
+            {error, _Reason} ->
+                io:format("Unknown function ~p~n", [Func]),
+                gearman_connection:send_request(Connection, work_fail, {Handle})
+        catch
+            Exc1:Exc2 ->
+                io:format("Work failed for function ~p: ~p:~p~n~p~n", [Func, Exc1, Exc2, erlang:get_stacktrace()]),
+                gearman_connection:send_request(Connection, work_fail, {Handle})
+        end
     end,
+
+    spawn(F),
+    
     gearman_connection:send_request(Connection, grab_job, {}),
     {next_state, working, State}.
 
