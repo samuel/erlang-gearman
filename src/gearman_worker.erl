@@ -22,6 +22,7 @@ start(Server, WorkerModules) ->
 %% gen_server callbacks
 
 init({_PidMaster, Server, WorkerModules}) ->
+    process_flag(trap_exit, true),
 	Functions = get_functions(WorkerModules),
     {ok, Connection} = gearman_connection:start_link(),
     gearman_connection:connect(Connection, Server),
@@ -36,6 +37,12 @@ get_functions([Module|Modules], Functions) ->
 
 %% Private Callbacks
 
+handle_info({'EXIT', _Pid, shutdown = Reason}, StateName, StateData) ->
+    {stop, Reason, StateData};
+
+handle_info({'EXIT', _Pid, Reason}, StateName, StateData) ->
+    {next_state, StateName, StateData};
+
 handle_info({Connection, connected}, _StateName, #state{connection=Connection} = State) ->
     register_functions(Connection, State#state.functions),
     gearman_connection:send_request(Connection, grab_job, {}),
@@ -46,16 +53,16 @@ handle_info(Other, StateName, State) ->
     ?MODULE:StateName(Other, State).
 
 handle_event(Event, StateName, State) ->
-    io:format("UNHANDLED event ~p ~p ~p~n", [Event, StateName, State]),
+    lager:info("~p unhandled event: ~p state: ~p data:~p", [?MODULE, Event, StateName, State]),
     {stop, {StateName, undefined_event, Event}, State}.
 
 handle_sync_event(Event, From, StateName, State) ->
-    io:format("UNHANDLED sync_event ~p ~p ~p ~p~n", [Event, From, StateName, State]),
+    lager:info("~p unheandled sync_event event: ~p from: ~p state: ~p data: ~p", [?MODULE, Event, From, StateName, State]),
     {stop, {StateName, undefined_event, Event}, State}.
 
-terminate(Reason, StateName, _State) ->
-    io:format("Worker terminated: ~p [~p]~n", [Reason, StateName]),
-    ok.
+terminate(Reason, StateName, State) ->
+    lager:info("~p:terminate reason: ~p state: ~p data: ~p", [?MODULE, Reason, StateName, State]),
+    wait_for_childrens(self(), 2000).
 
 code_change(_OldSvn, StateName, State, _Extra) ->
     {ok, StateName, State}.
@@ -74,17 +81,14 @@ working({Connection, command, {job_assign, Handle, Func, Arg}}, #state{connectio
             {ok, Result} ->
                 gearman_connection:send_request(Connection, work_complete, {Handle, Result});
             {error, _Reason} ->
-                io:format("Unknown function ~p~n", [Func]),
                 gearman_connection:send_request(Connection, work_fail, {Handle})
         catch
-            Exc1:Exc2 ->
-                io:format("Work failed for function ~p: ~p:~p~n~p~n", [Func, Exc1, Exc2, erlang:get_stacktrace()]),
+            _:_ ->
                 gearman_connection:send_request(Connection, work_fail, {Handle})
         end
     end,
 
-    spawn(F),
-    
+    spawn_link(F),
     gearman_connection:send_request(Connection, grab_job, {}),
     {next_state, working, State}.
 
@@ -96,7 +100,7 @@ sleeping({Connection, command, noop}, #state{connection=Connection} = State) ->
     {next_state, working, State}.
 
 dead(Event, State) ->
-    io:format("Received unexpected event for state 'dead': ~p ~p~n", [Event, State]),
+    lager:info("~p Received unexpected event for state 'dead': ~p ~p", [?MODULE, Event, State]),
     {next_state, dead, State}.
 
 %%%
@@ -117,3 +121,16 @@ register_functions(_Connection, []) ->
 register_functions(Connection, [{Name, _Function}|Functions]) ->
     gearman_connection:send_request(Connection, can_do, {Name}),
     register_functions(Connection, Functions).
+
+wait_for_childrens(Pid, Timeout) ->
+    {links, LinkedProcesses} = process_info(Pid, links),
+    NumberChildrens = length(LinkedProcesses) -1,
+    lager:info("~p:wait_for_childrens count: ~p",[?MODULE, NumberChildrens]),
+
+    if
+        NumberChildrens > 0 ->
+            timer:sleep(Timeout),
+            wait_for_childrens(Pid, Timeout);
+        true
+            -> ok
+    end.
