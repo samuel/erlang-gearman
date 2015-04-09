@@ -37,10 +37,10 @@ get_functions([Module|Modules], Functions) ->
 
 %% Private Callbacks
 
-handle_info({'EXIT', _Pid, shutdown = Reason}, StateName, StateData) ->
+handle_info({'EXIT', _Pid, shutdown = Reason}, _StateName, StateData) ->
     {stop, Reason, StateData};
 
-handle_info({'EXIT', _Pid, Reason}, StateName, StateData) ->
+handle_info({'EXIT', _Pid, _Reason}, StateName, StateData) ->
     {next_state, StateName, StateData};
 
 handle_info({Connection, connected}, _StateName, #state{connection=Connection} = State) ->
@@ -53,15 +53,15 @@ handle_info(Other, StateName, State) ->
     ?MODULE:StateName(Other, State).
 
 handle_event(Event, StateName, State) ->
-    lager:info("~p unhandled event: ~p state: ~p data:~p", [?MODULE, Event, StateName, State]),
+    lager:info("~p unhandled event: ~p state: ~p", [?MODULE, Event, StateName]),
     {stop, {StateName, undefined_event, Event}, State}.
 
 handle_sync_event(Event, From, StateName, State) ->
-    lager:info("~p unheandled sync_event event: ~p from: ~p state: ~p data: ~p", [?MODULE, Event, From, StateName, State]),
+    lager:info("~p unheandled sync_event event: ~p from: ~p state: ~p", [?MODULE, Event, From, StateName]),
     {stop, {StateName, undefined_event, Event}, State}.
 
-terminate(Reason, StateName, State) ->
-    lager:info("~p:terminate reason: ~p state: ~p data: ~p", [?MODULE, Reason, StateName, State]),
+terminate(Reason, StateName, _State) ->
+    lager:info("~p:terminate reason: ~p state: ~p", [?MODULE, Reason, StateName]),
     wait_for_childrens(self(), 2000).
 
 code_change(_OldSvn, StateName, State, _Extra) ->
@@ -100,7 +100,7 @@ sleeping({Connection, command, noop}, #state{connection=Connection} = State) ->
     {next_state, working, State}.
 
 dead(Event, State) ->
-    lager:info("~p Received unexpected event for state 'dead': ~p ~p", [?MODULE, Event, State]),
+    lager:info("~p Received unexpected event for state 'dead': ~p", [?MODULE, Event]),
     {next_state, dead, State}.
 
 %%%
