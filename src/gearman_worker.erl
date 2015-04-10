@@ -53,15 +53,15 @@ handle_info(Other, StateName, State) ->
     ?MODULE:StateName(Other, State).
 
 handle_event(Event, StateName, State) ->
-    lager:info("~p unhandled event: ~p state: ~p", [?MODULE, Event, StateName]),
+    lager:error("unhandled event: ~p state: ~p", [Event, StateName]),
     {stop, {StateName, undefined_event, Event}, State}.
 
 handle_sync_event(Event, From, StateName, State) ->
-    lager:info("~p unheandled sync_event event: ~p from: ~p state: ~p", [?MODULE, Event, From, StateName]),
+    lager:error("unheandled sync_event event: ~p from: ~p state: ~p", [Event, From, StateName]),
     {stop, {StateName, undefined_event, Event}, State}.
 
 terminate(Reason, StateName, _State) ->
-    lager:info("~p:terminate reason: ~p state: ~p", [?MODULE, Reason, StateName]),
+    lager:info("terminate with reason: ~p state: ~p", [Reason, StateName]),
     wait_for_childrens(self(), 2000).
 
 code_change(_OldSvn, StateName, State, _Extra) ->
@@ -100,7 +100,7 @@ sleeping({Connection, command, noop}, #state{connection=Connection} = State) ->
     {next_state, working, State}.
 
 dead(Event, State) ->
-    lager:info("~p Received unexpected event for state 'dead': ~p", [?MODULE, Event]),
+    lager:info("Received unexpected event for state 'dead': ~p", [Event]),
     {next_state, dead, State}.
 
 %%%
@@ -125,7 +125,7 @@ register_functions(Connection, [{Name, _Function}|Functions]) ->
 wait_for_childrens(Pid, Timeout) ->
     {links, LinkedProcesses} = process_info(Pid, links),
     NumberChildrens = length(LinkedProcesses) -1,
-    lager:info("~p:wait_for_childrens count: ~p",[?MODULE, NumberChildrens]),
+    lager:info("wait_for_childrens count: ~p",[NumberChildrens]),
 
     if
         NumberChildrens > 0 ->
