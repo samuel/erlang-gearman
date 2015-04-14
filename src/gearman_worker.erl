@@ -22,6 +22,7 @@ start(Server, WorkerModules) ->
 %% gen_server callbacks
 
 init({_PidMaster, Server, WorkerModules}) ->
+    process_flag(trap_exit, true),
 	Functions = get_functions(WorkerModules),
     {ok, Connection} = gearman_connection:start_link(),
     gearman_connection:connect(Connection, Server),
@@ -36,6 +37,12 @@ get_functions([Module|Modules], Functions) ->
 
 %% Private Callbacks
 
+handle_info({'EXIT', _Pid, shutdown = Reason}, _StateName, StateData) ->
+    {stop, Reason, StateData};
+
+handle_info({'EXIT', _Pid, _Reason}, StateName, StateData) ->
+    {next_state, StateName, StateData};
+
 handle_info({Connection, connected}, _StateName, #state{connection=Connection} = State) ->
     register_functions(Connection, State#state.functions),
     gearman_connection:send_request(Connection, grab_job, {}),
@@ -46,16 +53,16 @@ handle_info(Other, StateName, State) ->
     ?MODULE:StateName(Other, State).
 
 handle_event(Event, StateName, State) ->
-    io:format("UNHANDLED event ~p ~p ~p~n", [Event, StateName, State]),
+    lager:error("unhandled event: ~p state: ~p", [Event, StateName]),
     {stop, {StateName, undefined_event, Event}, State}.
 
 handle_sync_event(Event, From, StateName, State) ->
-    io:format("UNHANDLED sync_event ~p ~p ~p ~p~n", [Event, From, StateName, State]),
+    lager:error("unheandled sync_event event: ~p from: ~p state: ~p", [Event, From, StateName]),
     {stop, {StateName, undefined_event, Event}, State}.
 
 terminate(Reason, StateName, _State) ->
-    io:format("Worker terminated: ~p [~p]~n", [Reason, StateName]),
-    ok.
+    lager:info("terminate with reason: ~p state: ~p", [Reason, StateName]),
+    wait_for_childrens(self(), 2000).
 
 code_change(_OldSvn, StateName, State, _Extra) ->
     {ok, StateName, State}.
@@ -68,17 +75,20 @@ working({Connection, command, no_job}, #state{connection=Connection} = State) ->
     gearman_connection:send_request(Connection, pre_sleep, {}),
     {next_state, sleeping, State, 15*1000};
 working({Connection, command, {job_assign, Handle, Func, Arg}}, #state{connection=Connection, functions=Functions} = State) ->
-    try dispatch_function(Functions, Func, Arg, Handle) of
-        {ok, Result} ->
-            gearman_connection:send_request(Connection, work_complete, {Handle, Result});
-        {error, _Reason} ->
-            io:format("Unknown function ~p~n", [Func]),
-            gearman_connection:send_request(Connection, work_fail, {Handle})
-    catch
-        Exc1:Exc2 ->
-            io:format("Work failed for function ~p: ~p:~p~n~p~n", [Func, Exc1, Exc2, erlang:get_stacktrace()]),
-            gearman_connection:send_request(Connection, work_fail, {Handle})
+
+    F = fun() ->
+        try dispatch_function(Functions, Func, Arg, Handle) of
+            {ok, Result} ->
+                gearman_connection:send_request(Connection, work_complete, {Handle, Result});
+            {error, _Reason} ->
+                gearman_connection:send_request(Connection, work_fail, {Handle})
+        catch
+            _:_ ->
+                gearman_connection:send_request(Connection, work_fail, {Handle})
+        end
     end,
+
+    spawn_link(F),
     gearman_connection:send_request(Connection, grab_job, {}),
     {next_state, working, State}.
 
@@ -90,7 +100,7 @@ sleeping({Connection, command, noop}, #state{connection=Connection} = State) ->
     {next_state, working, State}.
 
 dead(Event, State) ->
-    io:format("Received unexpected event for state 'dead': ~p ~p~n", [Event, State]),
+    lager:info("Received unexpected event for state 'dead': ~p", [Event]),
     {next_state, dead, State}.
 
 %%%
@@ -111,3 +121,16 @@ register_functions(_Connection, []) ->
 register_functions(Connection, [{Name, _Function}|Functions]) ->
     gearman_connection:send_request(Connection, can_do, {Name}),
     register_functions(Connection, Functions).
+
+wait_for_childrens(Pid, Timeout) ->
+    {links, LinkedProcesses} = process_info(Pid, links),
+    NumberChildrens = length(LinkedProcesses) -1,
+    lager:info("wait_for_childrens count: ~p",[NumberChildrens]),
+
+    if
+        NumberChildrens > 0 ->
+            timer:sleep(Timeout),
+            wait_for_childrens(Pid, Timeout);
+        true
+            -> ok
+    end.
