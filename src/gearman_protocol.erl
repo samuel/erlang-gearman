@@ -3,7 +3,7 @@
 
 -export([parse_command/1, pack_request/2, pack_response/2]).
 
--spec(parse_command/1 :: (Data :: binary()) -> {'error', 'not_enough_data'} | {'ok', binary(), atom(), atom()} | {'ok', binary(), atom(), tuple()}).
+-spec(parse_command(Data :: binary()) -> {'error', 'not_enough_data'} | {'ok', binary(), atom(), atom()} | {'ok', binary(), atom(), tuple()}).
 parse_command(Data) when size(Data) >= 12 ->
     <<"\000RE", TypeChar:8, CommandID:32/big, DataLength:32/big, Rest/binary>> = Data,
     if
