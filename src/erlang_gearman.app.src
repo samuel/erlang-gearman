@@ -1,5 +1,10 @@
 {application, erlang_gearman,
  [
+  {description, "Gearman library for Erlang"},
   {vsn, "1"},
-  {modules, [gearman_connection, gearman_protocol, gearman_worker]}
+  {modules, [gearman_connection, gearman_protocol, gearman_worker]},
+  {applications, [
+      kernel,
+      stdlib
+  ]}
  ]}.
