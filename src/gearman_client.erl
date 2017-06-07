@@ -24,12 +24,10 @@
 start(GearmanHost) ->
     Name=list_to_atom(atom_to_list(?MODULE)++"_"++GearmanHost),
     error_logger:info_msg("gearman client start name ~p~n",[Name]),
-    gen_server:start({local, Name}, ?MODULE, [GearmanHost], []),
-    Name.
+    gen_server:start({local, Name}, ?MODULE, [GearmanHost], []).
 start_link(GearmanHost) ->
     Name=list_to_atom(atom_to_list(?MODULE)++"_"++GearmanHost),
-    gen_server:start_link({local, Name}, ?MODULE, [GearmanHost], []),
-    Name.
+    gen_server:start_link({local, Name}, ?MODULE, [GearmanHost], []).
 
 do_normal(GC,Function,Data) ->
     try gen_server:call(GC,{do_normal,Function,Data},4000) catch    %% timeout of 4000, this is lower than normal timeout of 5000.
