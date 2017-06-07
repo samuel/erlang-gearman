@@ -23,29 +23,27 @@
 
 start(GearmanHost) ->
     Name=list_to_atom(atom_to_list(?MODULE)++"_"++GearmanHost),
-    lager:info("gearman client start name ~p~n",[Name]),
-    gen_server:start({local, Name}, ?MODULE, [GearmanHost], []),
-    Name.
+    error_logger:info_msg("gearman client start name ~p~n",[Name]),
+    gen_server:start({local, Name}, ?MODULE, [GearmanHost], []).
 start_link(GearmanHost) ->
     Name=list_to_atom(atom_to_list(?MODULE)++"_"++GearmanHost),
-    gen_server:start_link({local, Name}, ?MODULE, [GearmanHost], []),
-    Name.
+    gen_server:start_link({local, Name}, ?MODULE, [GearmanHost], []).
 
 do_normal(GC,Function,Data) ->
     try gen_server:call(GC,{do_normal,Function,Data},4000) catch    %% timeout of 4000, this is lower than normal timeout of 5000.
                                                                     %% call should fail here first, not in calling process
         exit:{timeout,{gen_server,call,[_,{do_normal,_,_},_]}} ->
-            lager:error("timeout for gearman call to function ~p~n",[Function]),
+            error_logger:error_msg("timeout for gearman call to function ~p~n",[Function]),
             {error,timeout};
         Error:Reason ->
-            lager:error("error ~p with reason ~p for gearman call to function ~p~n",[Error,Reason,Function]),
+            error_logger:error_msg("error ~p with reason ~p for gearman call to function ~p~n",[Error,Reason,Function]),
             {error,{Error,Reason}}
     end.
 
 do_normal_cast(GC,Function,Data) ->
     try gen_server:cast(GC,{do_normal,Function,Data}) catch
         Error:Reason ->
-            lager:error("error ~p with reason ~p for gearman call to function ~p~n",[Error,Reason,Function]),
+            error_logger:error_msg("error ~p with reason ~p for gearman call to function ~p~n",[Error,Reason,Function]),
             {error,{Error,Reason}}
     end.
 
@@ -67,7 +65,7 @@ do_normal_cast(GC,Function,Data) ->
     Timeout :: non_neg_integer() | infinity.
 %% ====================================================================
 init([GearmanHost]) ->
-    lager:info("gearman client starting for host ~p~n",[GearmanHost]),
+    error_logger:info_msg("gearman client starting for host ~p~n",[GearmanHost]),
     GC=get_gearman_connection(GearmanHost),
     {ok, #state{gearman_host=GearmanHost,gearman_connection=GC}}.
 
@@ -89,7 +87,7 @@ init([GearmanHost]) ->
     Reason :: term().
 %% ====================================================================
 handle_call(Job={do_normal,Function,_Data}, From, State) ->
-    lager:info("New job received for function ~p",[Function]),
+    error_logger:info_msg("New job received for function ~p",[Function]),
     Job_requests=[{From,os:timestamp(),Job}|State#state.job_requests],
     gen_server:cast(self(),jobsubmit),
     NewState=State#state{job_requests=Job_requests},
@@ -113,21 +111,18 @@ handle_call(_Request, _From, State) ->
     Timeout :: non_neg_integer() | infinity.
 %% ====================================================================
 handle_cast(jobsubmit, State=#state{current_job={_From,Time,_Job}}) ->
-    lager:debug("jobsubmit, there is already a job waiting for an handle. State ~p",[State]),
     TimeDiff=timestamp_to_millisecs(timestamp_diff(os:timestamp(),Time)),
     NewState=handle_gearman_timeout(TimeDiff, State),
     Timer=set_jobwaiting_timer(State#state.current_job,State#state.timer),
     {noreply, NewState#state{timer=Timer}};
 
 handle_cast(jobsubmit, State=#state{job_requests=[]}) ->
-    lager:debug("jobsubmit, no jobs to be submitted. State ~p",[State]),
     Timer=set_jobwaiting_timer(State#state.current_job,State#state.timer),
     {noreply, State#state{timer=Timer}};
 
 handle_cast(jobsubmit, State) ->
     %%-> jobsubmit, check currentjob=undefined, otherwise nothing. Shift job from jobrequests, Submit job to gearman, put job in currentjob, set timeout when jobrequest not empty
     %% get last item from job_requests
-    lager:debug("jobsubmit, getting a job from the job_requests list. State: ~p",[State]),
     [FirstJob|Jobs]=lists:reverse(State#state.job_requests),
     {From,_Time,Job}=FirstJob,
     CurrentJob={From,os:timestamp(),Job},
@@ -137,7 +132,7 @@ handle_cast(jobsubmit, State) ->
     {noreply, NewState};
 
 handle_cast(Job={do_normal,Function,_Data}, State) ->
-    lager:info("New cast job received for function ~p",[Function]),
+    error_logger:info_msg("New cast job received for function ~p",[Function]),
     Job_requests=[{is_cast,os:timestamp(),Job}|State#state.job_requests],
     gen_server:cast(self(),jobsubmit),
     NewState=State#state{job_requests=Job_requests},
@@ -163,7 +158,7 @@ send_job(_Job={do_normal,Function,Data}, GearmanConnection) ->
     gearman_connection:send_request(GearmanConnection, submit_job, {Function, "", Data});
 
 send_job(Job,_) ->
-    lager:error("unknown job type: ~p", [Job]).
+    error_logger:error_msg("unknown job type: ~p", [Job]).
 
 
 %% handle_info/2
@@ -183,7 +178,6 @@ handle_info(jobsubmit_timer, State) ->
 %% {<0.9794.3>,command,{job_created,"H:hostname:identifier"}}
 handle_info({_,command,{job_created,Handle}}, State) ->
     %%submitted_job={From, Timestamp, job, Handle}
-    lager:debug("job_created from gearman server. Handle: ~p. State: ~p",[Handle,State]),
     {From,_,Job} = State#state.current_job,
     JIP=[{From,os:timestamp(),Job,Handle}|State#state.jobs_inprogress],
     NewState=State#state{current_job=undefined,jobs_inprogress=JIP},
@@ -195,13 +189,12 @@ handle_info({_,command,{job_created,Handle}}, State) ->
 handle_info({_,command,{work_complete,Handle, Result}}, State) ->
     %%io:format("gearman_client, info received work_complete for: ~p with state: ~p~n",[Handle,State]),
     %%submitted_job={From, Timestamp, job, Handle}
-    lager:debug("work_complete from gearman server. Handle: ~p. State: ~p",[Handle,State]),
     JobsInProgress=State#state.jobs_inprogress,
     case lists:keyfind(Handle, 4, JobsInProgress) of
         {From, _Timestamp, _Job, Handle}    ->
                           send_reply(From,Result),
                           NewJobsInProgress=lists:keydelete(Handle, 4, JobsInProgress);
-        _               ->  lager:error("Received 'work complete' for ~p with value ~p, but no pending jobs when state ~p~n",[Handle,Result,State]),
+        _               ->  error_logger:error_msg("Received 'work complete' for ~p with value ~p, but no pending jobs when state ~p~n",[Handle,Result,State]),
                           NewJobsInProgress=JobsInProgress
     end,
     {noreply, State#state{jobs_inprogress=NewJobsInProgress}};
@@ -212,18 +205,18 @@ handle_info({_,connected}, State) ->
     %%io:format("gearman_client, info received connected with state: ~p~n",[State]),
     %%submitted_job={From, Timestamp, job, Handle}
     JobsInProgress=State#state.jobs_inprogress,
-    lager:info("Gearman connected, cancelling current jobs in progress: ~p",[JobsInProgress]),
+    error_logger:info_msg("Gearman connected, cancelling current jobs in progress: ~p",[JobsInProgress]),
     lists:foreach(fun({From,_,_,_}) -> send_reply(From,error) end, JobsInProgress),
     {noreply, State#state{jobs_inprogress=[]}};
 
 %% {self(), disconnected} -> pending requests foutmelding returnen en afsluiten?
 handle_info({_,disconnected}, State) ->
     %%io:format("gearman_client, info received disconnected with state: ~p~n",[State]),
-    lager:error("stress, gearman disconnected when state: ~p",[State]),
+    error_logger:error_msg("stress, gearman disconnected when state: ~p",[State]),
     handle_info({undefined,connected}, State);
 
 handle_info(Info, State) ->
-    lager:info("gearman_client, info: ~p~n",[Info]),
+    error_logger:info_msg("gearman_client, info: ~p~n",[Info]),
     {noreply, State}.
 
 
@@ -286,7 +279,7 @@ restart_gearman(GearmanHost,CurrentGearman) ->
     get_gearman_connection(GearmanHost).
 
 handle_gearman_timeout(TimeDiff, State)  when TimeDiff>=3000 ->
-    lager:error("Gearman timeout, did not get a jobhandle in time (3sec)"),
+    error_logger:error_msg("Gearman timeout, did not get a jobhandle in time (3sec)"),
     log_queues(State),
     CurrentGearman=State#state.gearman_connection,
     GearmanHost=State#state.gearman_host,
@@ -309,4 +302,4 @@ log_queues(State) ->
     NumberOfRequests=length(State#state.job_requests),
     NumberOfProgress=length(State#state.jobs_inprogress),
     WaitingHandle=case State#state.current_job of undefined->0; _->1 end,
-    lager:info("Number of job requests without handle: ~p, number of jobs waiting for result: ~p, job waiting for handle: ~p",[NumberOfRequests,NumberOfProgress,WaitingHandle]).
+    error_logger:info_msg("Number of job requests without handle: ~p, number of jobs waiting for result: ~p, job waiting for handle: ~p",[NumberOfRequests,NumberOfProgress,WaitingHandle]).
