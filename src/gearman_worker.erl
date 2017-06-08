@@ -107,14 +107,11 @@ dead(Event, State) ->
 
 dispatch_function([], _Func, _Arg, _Handle) ->
     {error, invalid_function};
-dispatch_function([{Name, Function}|Functions], Func, Arg, Handle) ->
-    if
-        Name == Func ->
-            Res = Function(Handle, Func, Arg),
-            {ok, Res};
-        true ->
-            dispatch_function(Functions, Func, Arg, Handle)
-    end.
+dispatch_function([{Func, Function}|_], Func, Arg, Handle) ->
+    Res = Function(Handle, Func, Arg),
+    {ok, Res};
+dispatch_function([_|Functions], Func, Arg, Handle) ->
+    dispatch_function(Functions, Func, Arg, Handle).
 
 register_functions(_Connection, []) ->
     ok;
