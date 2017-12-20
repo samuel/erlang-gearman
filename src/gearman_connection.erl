@@ -92,13 +92,7 @@ handle_info(Info,  State) ->
 
 terminate(Reason, #state{socket=Socket}) ->
     error_logger:error_msg("stopping: ~p", [Reason]),
-    case Socket of
-        not_connected ->
-            void;
-        _ ->
-            gen_tcp:close(Socket)
-    end,
-    ok.
+    close_socket(Socket).
 
 handle_cast(stop, State) ->
     {stop, normal, State}.
@@ -109,9 +103,11 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 disconnect_state(State) ->
     State#state.pidparent ! {self(), disconnected},
-    gen_tcp:close(State#state.socket),
+    close_socket(State#state.socket),
     State#state{socket=not_connected, buffer=[]}.
 
+close_socket(not_connected) -> ok;
+close_socket(Socket)        -> gen_tcp:close(Socket).
 
 handle_command(State, NewData) ->
 	Packet = list_to_binary([State#state.buffer, NewData]),
