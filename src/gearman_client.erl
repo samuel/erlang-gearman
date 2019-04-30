@@ -20,13 +20,16 @@
 %% ====================================================================
 %% API functions
 %% ====================================================================
-
 start(GearmanHost) ->
-    Name=list_to_atom(atom_to_list(?MODULE)++"_"++GearmanHost),
+    start(GearmanHost, []).
+start(GearmanHost, Prefix) ->
+    Name=list_to_atom(Prefix++atom_to_list(?MODULE)++"_"++GearmanHost),
     error_logger:info_msg("gearman client start name ~p~n",[Name]),
     gen_server:start({local, Name}, ?MODULE, [GearmanHost], []).
 start_link(GearmanHost) ->
-    Name=list_to_atom(atom_to_list(?MODULE)++"_"++GearmanHost),
+      start_link(GearmanHost, []).
+start_link(GearmanHost, Prefix) ->
+    Name=list_to_atom(Prefix++atom_to_list(?MODULE)++"_"++GearmanHost),
     gen_server:start_link({local, Name}, ?MODULE, [GearmanHost], []).
 
 do_normal(GC,Function,Data) ->
