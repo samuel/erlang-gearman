@@ -53,12 +53,12 @@ handle_call({send_command, Packet}, _From, State) ->
         ok ->
             {reply, ok, State};
         Any ->
-            io:format("gen_tcp:send returned unhandled value ~p~n", [Any]),
+            error_logger:error_msg("gen_tcp:send returned unhandled value ~p", [Any]),
             NewState = disconnect_state(State),
             {reply, {error, Any}, NewState, ?RECONNECT_DELAY}
     catch
         Exc1:Exc2 ->
-            io:format("gen_tcp:send raised an exception ~p:~p~n", [Exc1, Exc2]),
+            error_logger:error_msg("gen_tcp:send raised an exception ~p:~p", [Exc1, Exc2]),
             NewState = disconnect_state(State),
             {reply, {error, {Exc1, Exc2}}, NewState, ?RECONNECT_DELAY}
     end.
@@ -77,7 +77,7 @@ handle_info(timeout, #state{host=Host, port=Port, socket=OldSocket} = State) ->
 					{noreply, State, ?RECONNECT_DELAY}
             end;
         _ ->
-            io:format("Timeout while socket not disconnected: ~p~n", [State]),
+            error_logger:error_msg("Timeout while socket not disconnected: ~p", [State]),
             {noreply, State}
     end;
 handle_info({tcp, _Socket, NewData}, State) ->
@@ -87,18 +87,12 @@ handle_info({tcp_closed, _Socket}, State) ->
     NewState = disconnect_state(State),
     {noreply, NewState, ?RECONNECT_DELAY};
 handle_info(Info,  State) ->
-    io:format("UNHANDLED handle_info ~p ~p~n", [Info, State]),
+    error_logger:error_msg("unhandled handle_info ~p ~p", [Info, State]),
     {noreply, State}.
 
 terminate(Reason, #state{socket=Socket}) ->
-    io:format("~p stopping: ~p~n", [?MODULE, Reason]),
-    case Socket of
-        not_connected ->
-            void;
-        _ ->
-            gen_tcp:close(Socket)
-    end,
-    ok.
+    error_logger:error_msg("stopping: ~p", [Reason]),
+    close_socket(Socket).
 
 handle_cast(stop, State) ->
     {stop, normal, State}.
@@ -109,9 +103,11 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 disconnect_state(State) ->
     State#state.pidparent ! {self(), disconnected},
-    gen_tcp:close(State#state.socket),
+    close_socket(State#state.socket),
     State#state{socket=not_connected, buffer=[]}.
 
+close_socket(not_connected) -> ok;
+close_socket(Socket)        -> gen_tcp:close(Socket).
 
 handle_command(State, NewData) ->
 	Packet = list_to_binary([State#state.buffer, NewData]),
