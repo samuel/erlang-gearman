@@ -48,6 +48,9 @@ init(PidParent) ->
 handle_call({connect, Host, Port}, _From, State) ->
     NewState = State#state{host=Host, port=Port},
     {reply, ok, NewState, 0};
+handle_call({send_command, _}, _From, #state{socket=not_connected} = State) ->
+    error_logger:error_msg("Can't send message because gearman client is not connected"),
+    {reply, {error, not_connected}, State, 0};
 handle_call({send_command, Packet}, _From, State) ->
     try gen_tcp:send(State#state.socket, Packet) of
         ok ->
@@ -55,12 +58,12 @@ handle_call({send_command, Packet}, _From, State) ->
         Any ->
             error_logger:error_msg("gen_tcp:send returned unhandled value ~p", [Any]),
             NewState = disconnect_state(State),
-            {reply, {error, Any}, NewState, ?RECONNECT_DELAY}
+            {reply, {error, Any}, NewState, 0}
     catch
         Exc1:Exc2 ->
             error_logger:error_msg("gen_tcp:send raised an exception ~p:~p", [Exc1, Exc2]),
             NewState = disconnect_state(State),
-            {reply, {error, {Exc1, Exc2}}, NewState, ?RECONNECT_DELAY}
+            {reply, {error, {Exc1, Exc2}}, NewState, 0}
     end.
 
 handle_info(timeout, #state{host=Host, port=Port, socket=OldSocket} = State) ->
